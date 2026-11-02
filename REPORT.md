@@ -65,6 +65,23 @@ Après `bun run migrate` et `ANALYZE bookings`, seconde exécution :
 - L'index porte `(room_id, start_at)` : l'égalité sur la salle en premier, puis la borne `start_at < …`. `end_at` n'est pas dans l'index, car la condition `end_at > …` ne réduit presque pas les lignes en plus de la salle et de la borne de début.
 - Les durées sont de l'ordre de la milliseconde parce que la table est petite. L'écart entre les deux plans compte plus que le chiffre : il grandit avec la taille de la table.
 
+## 2. Cache clé-valeur (étape 6)
+
+### Répartition PostgreSQL / Valkey
+
+| Donnée | Où | Raison |
+| --- | --- | --- |
+| Salles, membres, réservations, historique des annulations | PostgreSQL | Données de référence : il faut des contraintes (exclusion du chevauchement, clés étrangères), des transactions (quota par membre, double annulation) et de la durabilité. |
+| Planning d'une salle pour une période | Valkey (cache) | Donnée dérivée, relisible à tout moment dans PostgreSQL, qu'on peut perdre sans dommage. L'expiration automatique convient. |
+
+Les réservations pourraient-elles être stockées dans Valkey ? Techniquement oui, on peut les ranger par salle dans un ensemble trié par date de début. Ce n'est pas adapté ici :
+
+- Aucune contrainte d'exclusion : l'absence de chevauchement, le quota par membre et la maintenance devraient être codés à la main avec des scripts atomiques, alors que PostgreSQL les garantit.
+- Durabilité : Valkey sert d'abord de mémoire rapide. Même avec la persistance activée, une coupure peut perdre les dernières écritures, ce qui est exactement l'incident que l'association veut éviter (créneaux écrasés).
+- Requêtes : relier réservations, membres et salles, trier, filtrer par statut ou calculer des statistiques d'occupation demande du SQL.
+
+Taille de l'association : 4 salles et au plus 13 créneaux d'une heure par jour font moins de 20 000 réservations par an, même salles pleines tous les jours. PostgreSQL traite ce volume en quelques millisecondes (voir la mesure sur 100 000 lignes dans la section 1). Un cache n'est donc pas indispensable aujourd'hui : il soulage seulement la page de planning les soirs de forte consultation. Il ne justifie pas de déplacer la donnée de référence vers un second système à exploiter.
+
 ## 3. Sauvegarde et restauration (étape 7)
 
 ### Commandes
