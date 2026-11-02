@@ -1,15 +1,17 @@
+import { RedisClient } from 'bun'
 import { Pool } from 'pg'
 import { BookingService } from '#/application/booking-service.ts'
 import { requireEnv } from '#/config.ts'
 import { createApp } from '#/http/app.ts'
-import { noCache } from '#/infrastructure/no-cache.ts'
 import { PostgresBookingStore } from '#/infrastructure/postgres-booking-store.ts'
+import { ValkeyPlanningCache } from '#/infrastructure/valkey-planning-cache.ts'
 
 const pool = new Pool({ connectionString: requireEnv('DATABASE_URL') })
+const valkey = new RedisClient(requireEnv('VALKEY_URL'))
 
 const service = new BookingService(
   new PostgresBookingStore(pool),
-  noCache,
+  new ValkeyPlanningCache(valkey),
   { now: () => new Date() },
   () => crypto.randomUUID(),
 )
@@ -23,6 +25,7 @@ console.log(`Studio Riff API on ${server.url}`)
 
 async function shutdown() {
   await server.stop()
+  valkey.close()
   await pool.end()
   process.exit(0)
 }

@@ -81,3 +81,9 @@ La migration `001` crée le schéma, la migration `002` ajoute l'index `bookings
 - **Contexte** : le projet vu en cours utilise un conteneur d'injection, des types `Result`/`Option`, un bus d'événements et plusieurs contextes. Ces patterns répondent à des besoins qu'on n'a pas ici : un seul contexte métier, aucun effet de bord à propager vers un autre module.
 - **Décision** : l'assemblage se fait à la main dans `main.ts` (injection par constructeur), les échecs métier sont des exceptions typées (`InvalidInput`, `NotFound`, `Conflict`) traduites en HTTP à un seul endroit, et il n'y a pas de bus.
 - **Conséquences** : moins de fichiers, flux lisible de la route à la requête SQL. Les ports (`BookingStore`, `PlanningCache`, `Clock`) restent des interfaces, donc le test avec horloge fixe et le remplacement du cache restent possibles. Si l'application grossissait (notifications, plusieurs contextes), on reconsidérerait le bus.
+
+### ADR 3 : invalidation du cache par numéro de version de salle
+
+- **Contexte** : une réservation ou une annulation doit apparaître tout de suite dans le planning, et chaque planning est caché pour plusieurs périodes (`from`/`to`) : supprimer les bonnes clés demande de les retrouver.
+- **Décision** : chaque salle a un compteur `riff:planning-version:<salle>`. La clé du planning contient ce numéro. Une écriture incrémente le compteur, donc les anciennes clés ne sont plus jamais lues et expirent seules (TTL 60 s). Le service lit le numéro avant de lire PostgreSQL et range le résultat sous ce numéro-là.
+- **Conséquences** : pas de recherche de clés (`KEYS`) ni d'ensemble à tenir à jour ; pas de planning périmé même si une écriture arrive entre la lecture en base et l'écriture dans le cache (le résultat est rangé sous l'ancien numéro, que plus personne ne lit). Coût : deux lectures Valkey par requête. Si Valkey est arrêté, toute erreur ou lenteur (plus de 300 ms) est ignorée et la lecture se fait dans PostgreSQL.
