@@ -40,6 +40,11 @@ export function createApp(service: BookingService) {
     })
   })
 
+  app.delete('/bookings/:id', async (c) => {
+    await service.cancel(c.req.param('id'))
+    return c.body(null, 204)
+  })
+
   app.notFound((c) => c.json({ error: 'Route not found' }, 404))
 
   app.onError((error, c) => {

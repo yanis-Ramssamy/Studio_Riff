@@ -1,5 +1,8 @@
 import { newBooking } from '#/domain/booking.ts'
+import { cancelBooking } from '#/domain/cancellation.ts'
 import { InvalidInput, NotFound } from '#/domain/errors.ts'
+import { checkMemberQuota } from '#/domain/member-quota.ts'
+import { checkRoomAvailable } from '#/domain/maintenance.ts'
 import { checkSlot } from '#/domain/slot.ts'
 import type { Booking, Room } from '#/domain/types.ts'
 import type {
@@ -67,6 +70,10 @@ export class BookingService {
       if (!(await tx.lockMember(request.memberId))) {
         throw new NotFound('Member not found')
       }
+      checkRoomAvailable(room, slot)
+      checkMemberQuota(
+        await tx.countUpcoming(request.memberId, this.clock.now()),
+      )
 
       const created = newBooking(this.newId(), room.id, request.memberId, slot)
       await tx.insertBooking(created)
@@ -75,5 +82,19 @@ export class BookingService {
 
     await this.cache.invalidate(booking.roomId)
     return booking
+  }
+
+  async cancel(id: string): Promise<void> {
+    const cancelled = await this.store.transaction(async (tx) => {
+      const booking = await tx.findBookingForUpdate(id)
+      if (!booking) {
+        throw new NotFound('Booking not found')
+      }
+      const result = cancelBooking(booking, this.clock.now())
+      await tx.updateStatus(id, result.status)
+      return result
+    })
+
+    await this.cache.invalidate(cancelled.roomId)
   }
 }
